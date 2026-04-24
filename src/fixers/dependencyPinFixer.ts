@@ -1,6 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Finding } from "../models/finding.js";
+import { exists } from "../utils/fs.js";
+import { execCommand } from "../utils/exec.js";
 import type { FixCandidate, RuleFixer } from "./types.js";
 
 interface PackageJson {
@@ -24,11 +26,30 @@ function moduleNameFromRaw(raw: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+async function updateLockfile(repoPath: string): Promise<boolean> {
+  if (await exists(path.join(repoPath, "package-lock.json"))) {
+    const result = await execCommand("npm", ["install", "--package-lock-only", "--ignore-scripts"], repoPath);
+    return result.code === 0;
+  }
+
+  if (await exists(path.join(repoPath, "pnpm-lock.yaml"))) {
+    const result = await execCommand("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], repoPath);
+    return result.code === 0;
+  }
+
+  if (await exists(path.join(repoPath, "yarn.lock"))) {
+    const result = await execCommand("yarn", ["install", "--mode", "update-lockfile"], repoPath);
+    return result.code === 0;
+  }
+
+  return true;
+}
+
 export class DependencyPinFixer implements RuleFixer {
   name = "dependency-pin-update";
 
   supports(finding: Finding): boolean {
-    return finding.patchMetadata.strategy === "dependency-upgrade";
+    return finding.patchMetadata.strategy === "dependency-upgrade" && finding.autofix === "safe";
   }
 
   buildCandidate(finding: Finding): FixCandidate | undefined {
@@ -72,7 +93,7 @@ export class DependencyPinFixer implements RuleFixer {
         }
 
         await writeFile(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
-        return true;
+        return updateLockfile(repoPath);
       }
     };
   }

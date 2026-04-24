@@ -5,11 +5,12 @@ import { createDeterministicBranch, buildCommitMessage, commitAll, diffStat, get
 import { loadPolicyConfig } from "../config/schema.js";
 import { DependencyPinFixer } from "../fixers/dependencyPinFixer.js";
 import { EslintFixer } from "../fixers/eslintFixer.js";
-import { PrivatePackageFixer } from "../fixers/privatePackageFixer.js";
 import type { FixCandidate, RuleFixer } from "../fixers/types.js";
 import { selectCandidatesByPolicy } from "../policy/engine.js";
 import { createGithubPullRequest, markGithubPullRequestReady } from "../providers/github.js";
 import { createGitlabMergeRequest } from "../providers/gitlab.js";
+import { readJson } from "../utils/fs.js";
+import { execCommand } from "../utils/exec.js";
 import { evaluateChangePolicyGates, shouldCreateDraftPr, shouldPromoteDraft } from "./gates.js";
 
 export interface FixEngineResult {
@@ -36,7 +37,31 @@ interface FixEngineInput {
 }
 
 function getFixers(): RuleFixer[] {
-  return [new DependencyPinFixer(), new PrivatePackageFixer(), new EslintFixer()];
+  return [new DependencyPinFixer(), new EslintFixer()];
+}
+
+interface PackageJson {
+  scripts?: Record<string, string>;
+}
+
+async function testsPassIfConfigured(repoPath: string): Promise<GateResult> {
+  const pkg = await readJson<PackageJson>(path.join(repoPath, "package.json"));
+  const testScript = pkg?.scripts?.test;
+  if (!testScript) {
+    return { allowed: true };
+  }
+
+  const result = await execCommand("npm", ["run", "test"], repoPath);
+  if (result.code !== 0) {
+    return { allowed: false, reason: "Test command failed after applying fixes" };
+  }
+
+  return { allowed: true };
+}
+
+interface GateResult {
+  allowed: boolean;
+  reason?: string;
 }
 
 function markdownTable(candidates: FixCandidate[], applied: Set<string>): string {
@@ -80,12 +105,11 @@ function buildReviewBody(summaryTable: string, beforeArtifact: string, afterArti
 export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResult> {
   const policyConfig = await loadPolicyConfig(input.repoPath);
   const safeFindings = input.findings.filter((finding) => finding.autofix === "safe");
-  const riskyFindings = input.findings.filter((finding) => finding.autofix === "risky");
 
   const fixers = getFixers();
   const candidates: FixCandidate[] = [];
 
-  for (const finding of [...safeFindings, ...riskyFindings]) {
+  for (const finding of safeFindings) {
     const fixer = fixers.find((ruleFixer) => ruleFixer.supports(finding));
     if (!fixer) continue;
 
@@ -160,6 +184,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
     await writeFile(afterArtifact, gateResult.reason ?? "Change gates blocked update", "utf8");
     return {
       skipped: gateResult.reason ?? "Policy gate blocked changes",
+      branch,
+      baseBranch,
+      appliedFindingIds: [...appliedFindingIds],
+      summaryTable: markdownTable(candidates, appliedFindingIds),
+      beforeArtifact,
+      afterArtifact
+    };
+  }
+
+  const testGateResult = await testsPassIfConfigured(input.repoPath);
+  if (!testGateResult.allowed) {
+    await writeFile(afterArtifact, testGateResult.reason ?? "Test gate failed", "utf8");
+    return {
+      skipped: testGateResult.reason ?? "Test gate failed",
       branch,
       baseBranch,
       appliedFindingIds: [...appliedFindingIds],
