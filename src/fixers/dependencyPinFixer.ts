@@ -42,8 +42,9 @@ export class DependencyPinFixer implements RuleFixer {
     return {
       findingId: finding.id,
       summary: `Pin ${moduleName} to ${targetVersion}`,
-      category: "safe",
+      category: "deps",
       risk: "safe",
+      touches: ["package.json"],
       apply: async (repoPath: string): Promise<boolean> => {
         const packageJsonPath = path.join(repoPath, "package.json");
         const content = await readFile(packageJsonPath, "utf8");
