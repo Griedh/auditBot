@@ -20,6 +20,10 @@ export class PolicyScanner implements Scanner {
     if (!hasLock.some(Boolean)) {
       findings.push({
         id: stableId([this.name, "missing-lockfile"]),
+        source: "policy",
+        message: "No lockfile detected",
+        autofixable: false,
+        fixType: "manual",
         scanner: this.name,
         title: "No lockfile detected",
         description: "Repository should include a lockfile for deterministic dependency resolution.",
@@ -35,6 +39,10 @@ export class PolicyScanner implements Scanner {
     if (pkg && pkg.private !== true) {
       findings.push({
         id: stableId([this.name, "pkg-private"]),
+        source: "policy",
+        message: "Package should be private",
+        autofixable: true,
+        fixType: "codemod",
         scanner: this.name,
         title: "Package should be private",
         description: "Set package.json private=true to reduce accidental publishes.",
