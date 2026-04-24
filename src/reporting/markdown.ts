@@ -10,7 +10,7 @@ export function renderMarkdownSummary(findings: Finding[]): string {
     lines.push(`- severity: ${finding.severity}`);
     lines.push(`- confidence: ${finding.confidence}`);
     lines.push(`- file: ${finding.file ?? "n/a"}`);
-    lines.push(`- autofixable: ${finding.autofixable}`);
+    lines.push(`- autofix: ${finding.autofix}`);
     lines.push("");
     lines.push(finding.description);
     lines.push("");

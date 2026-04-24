@@ -1,7 +1,8 @@
 export type FindingSeverity = "critical" | "high" | "medium" | "low" | "info";
+export type AutofixLevel = "none" | "safe" | "risky";
 
 export interface PatchMetadata {
-  strategy: "none" | "manual" | "dependency-upgrade" | "codemod";
+  strategy: "none" | "manual" | "dependency-upgrade" | "codemod" | "eslint-fix";
   targetVersion?: string;
   patchPreview?: string;
 }
@@ -14,9 +15,23 @@ export interface Finding {
   severity: FindingSeverity;
   file?: string;
   confidence: number;
-  autofixable: boolean;
+  autofix: AutofixLevel;
   patchMetadata: PatchMetadata;
   raw?: unknown;
+}
+
+export interface FixEngineMetadata {
+  branch?: string;
+  baseBranch?: string;
+  commitSha?: string;
+  commitMessage?: string;
+  prUrl?: string;
+  mrUrl?: string;
+  skipped?: string;
+  appliedFindingIds: string[];
+  summaryTable: string;
+  beforeArtifact: string;
+  afterArtifact: string;
 }
 
 export interface RunReport {
@@ -29,6 +44,7 @@ export interface RunReport {
   monorepo: boolean;
   workspaces: string[];
   findings: Finding[];
+  fixEngine: FixEngineMetadata;
   logsFile: string;
   markdownFile: string;
   diffPreviewFile: string;

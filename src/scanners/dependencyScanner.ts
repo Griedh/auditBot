@@ -47,7 +47,7 @@ export class DependencyScanner implements Scanner {
           severity: toSeverity(advisory.severity as string | undefined),
           file: "package.json",
           confidence: 0.95,
-          autofixable: true,
+          autofix: "safe",
           patchMetadata: {
             strategy: "dependency-upgrade",
             targetVersion: String(advisory.recommendation ?? "") || undefined

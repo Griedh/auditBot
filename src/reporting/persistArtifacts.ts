@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Finding } from "../models/finding.js";
+import type { Finding, FixEngineMetadata } from "../models/finding.js";
 import type { RepositoryLayout } from "../orchestrator/detection.js";
 import { renderMarkdownSummary } from "./markdown.js";
 
@@ -14,6 +14,7 @@ interface PersistInput {
   logs: string[];
   startedAt: string;
   finishedAt: string;
+  fixEngine: FixEngineMetadata;
 }
 
 export async function persistArtifacts(input: PersistInput): Promise<{
@@ -39,7 +40,8 @@ export async function persistArtifacts(input: PersistInput): Promise<{
         workspaces: input.layout.workspaces,
         startedAt: input.startedAt,
         finishedAt: input.finishedAt,
-        findings: input.findings
+        findings: input.findings,
+        fixEngine: input.fixEngine
       },
       null,
       2
