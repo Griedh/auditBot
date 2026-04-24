@@ -44,7 +44,10 @@ function buildFinding(scanner: string, input: AuditFindingInput): Finding {
       strategy: input.fixVersion ? "dependency-upgrade" : "manual",
       targetVersion: input.fixVersion
     },
-    raw: input.raw
+    raw: {
+      module_name: input.dependency,
+      advisory: input.raw
+    }
   };
 }
 

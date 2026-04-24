@@ -29,6 +29,21 @@ const ESLINT_CONFIG_FILES = [
   "eslint.config.ts"
 ];
 
+const SAFE_AUTOFIX_RULES = new Set<string>([
+  "array-bracket-spacing",
+  "arrow-spacing",
+  "comma-dangle",
+  "eol-last",
+  "keyword-spacing",
+  "no-multiple-empty-lines",
+  "no-trailing-spaces",
+  "object-curly-spacing",
+  "quotes",
+  "semi",
+  "space-before-blocks",
+  "space-in-parens"
+]);
+
 function severityFromEslint(value: number | undefined): Finding["severity"] {
   if (value === 2) return "high";
   if (value === 1) return "low";
@@ -69,7 +84,7 @@ export class StaticScanner implements Scanner {
           severity: severityFromEslint(item.severity),
           file: entry.filePath,
           confidence: 0.9,
-          autofix: item.fix ? "risky" : "none",
+          autofix: item.fix && SAFE_AUTOFIX_RULES.has(ruleId) ? "safe" : item.fix ? "risky" : "none",
           patchMetadata: { strategy: item.fix ? "eslint-fix" : "manual" },
           raw: item
         });
