@@ -1,11 +1,13 @@
 import type { Finding } from "../models/finding.js";
+import type { FixCategory } from "../config/schema.js";
 
 export type FixRisk = "safe" | "risky";
 
 export interface FixCandidate {
   findingId: string;
   summary: string;
-  category: string;
+  category: FixCategory;
+  touches?: string[];
   risk: FixRisk;
   apply(repoPath: string): Promise<boolean>;
 }

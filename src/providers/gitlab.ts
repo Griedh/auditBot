@@ -6,6 +6,7 @@ interface GitlabMergeRequestInput {
   targetBranch: string;
   labels: string[];
   requireHumanReview: boolean;
+  draft?: boolean;
 }
 
 export interface MergeRequestResult {
@@ -41,6 +42,7 @@ export async function createGitlabMergeRequest(input: GitlabMergeRequestInput): 
       target_branch: input.targetBranch,
       remove_source_branch: false,
       squash: false,
+      draft: input.draft ?? false,
       labels: input.labels.join(",")
     })
   });

@@ -18,7 +18,7 @@ export class EslintFixer implements RuleFixer {
     return {
       findingId: finding.id,
       summary: "Run lint --fix via ESLint fixer API",
-      category: "risky",
+      category: "lint",
       risk: "risky",
       apply: async (repoPath: string): Promise<boolean> => {
         const pkg = await readJson<PackageJson>(`${repoPath}/package.json`);

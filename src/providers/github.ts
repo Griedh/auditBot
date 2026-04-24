@@ -6,10 +6,12 @@ interface GithubPullRequestInput {
   base: string;
   labels: string[];
   requireHumanReview: boolean;
+  draft?: boolean;
 }
 
 export interface PullRequestResult {
   url?: string;
+  number?: number;
   skipped: boolean;
   reason?: string;
 }
@@ -38,7 +40,7 @@ export async function createGithubPullRequest(input: GithubPullRequestInput): Pr
         input.requireHumanReview ? "" : " unless explicitly configured."
       }`,
       maintainer_can_modify: false,
-      draft: false
+      draft: input.draft ?? false
     })
   });
 
@@ -61,5 +63,28 @@ export async function createGithubPullRequest(input: GithubPullRequestInput): Pr
     });
   }
 
-  return { skipped: false, url: created.html_url };
+  return { skipped: false, url: created.html_url, number: created.number };
+}
+
+export async function markGithubPullRequestReady(repository: string, pullNumber: number): Promise<PullRequestResult> {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    return { skipped: true, reason: "GITHUB_TOKEN not configured" };
+  }
+
+  const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${pullNumber}/ready_for_review`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    return { skipped: true, reason: `GitHub PR ready-for-review failed: ${await response.text()}` };
+  }
+
+  const body = (await response.json()) as { html_url?: string };
+  return { skipped: false, url: body.html_url };
 }

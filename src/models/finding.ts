@@ -27,6 +27,7 @@ export interface FixEngineMetadata {
   commitMessage?: string;
   prUrl?: string;
   mrUrl?: string;
+  draftPr?: boolean;
   skipped?: string;
   appliedFindingIds: string[];
   summaryTable: string;

@@ -14,8 +14,9 @@ export class PrivatePackageFixer implements RuleFixer {
     return {
       findingId: finding.id,
       summary: "Set package.json private=true",
-      category: "safe",
+      category: "code-style",
       risk: "safe",
+      touches: ["package.json"],
       apply: async (repoPath: string): Promise<boolean> => {
         const packageJsonPath = path.join(repoPath, "package.json");
         const content = await readFile(packageJsonPath, "utf8");

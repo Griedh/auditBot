@@ -2,12 +2,15 @@ import path from "node:path";
 import { writeFile } from "node:fs/promises";
 import type { Finding } from "../models/finding.js";
 import { createDeterministicBranch, buildCommitMessage, commitAll, diffStat, getCurrentBranch, getDefaultRemote, getRepositorySlug, hasWorkingTreeChanges, pushBranch } from "../git/client.js";
+import { loadPolicyConfig } from "../config/schema.js";
 import { DependencyPinFixer } from "../fixers/dependencyPinFixer.js";
 import { EslintFixer } from "../fixers/eslintFixer.js";
 import { PrivatePackageFixer } from "../fixers/privatePackageFixer.js";
 import type { FixCandidate, RuleFixer } from "../fixers/types.js";
-import { createGithubPullRequest } from "../providers/github.js";
+import { selectCandidatesByPolicy } from "../policy/engine.js";
+import { createGithubPullRequest, markGithubPullRequestReady } from "../providers/github.js";
 import { createGitlabMergeRequest } from "../providers/gitlab.js";
+import { evaluateChangePolicyGates, shouldCreateDraftPr, shouldPromoteDraft } from "./gates.js";
 
 export interface FixEngineResult {
   branch?: string;
@@ -16,6 +19,7 @@ export interface FixEngineResult {
   commitMessage?: string;
   prUrl?: string;
   mrUrl?: string;
+  draftPr?: boolean;
   skipped?: string;
   appliedFindingIds: string[];
   summaryTable: string;
@@ -74,6 +78,7 @@ function buildReviewBody(summaryTable: string, beforeArtifact: string, afterArti
 }
 
 export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResult> {
+  const policyConfig = await loadPolicyConfig(input.repoPath);
   const safeFindings = input.findings.filter((finding) => finding.autofix === "safe");
   const riskyFindings = input.findings.filter((finding) => finding.autofix === "risky");
 
@@ -91,14 +96,34 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   }
 
   const safeCandidates = candidates.filter((candidate) => candidate.risk === "safe");
+  const findingsById = new Map<string, Finding>(input.findings.map((finding) => [finding.id, finding]));
+  const policySelection = selectCandidatesByPolicy(safeCandidates, findingsById, policyConfig);
   const beforeArtifact = path.join(input.runDir, "fixes-before.txt");
   const afterArtifact = path.join(input.runDir, "fixes-after.txt");
-  await writeFile(beforeArtifact, safeCandidates.map((candidate) => `${candidate.findingId}: ${candidate.summary}`).join("\n"), "utf8");
+  await writeFile(
+    beforeArtifact,
+    policySelection.allowedCandidates.map((candidate) => `${candidate.findingId}: ${candidate.summary}`).join("\n"),
+    "utf8"
+  );
 
-  if (safeCandidates.length === 0) {
+  if (policySelection.allowedCandidates.length === 0) {
     await writeFile(afterArtifact, "No safe candidates generated.", "utf8");
     return {
-      skipped: "No safe autofix candidates available",
+      skipped:
+        policySelection.skipped.length > 0
+          ? `Policy blocked all autofix candidates: ${policySelection.skipped.map((entry) => `${entry.findingId} (${entry.reason})`).join("; ")}`
+          : "No safe autofix candidates available",
+      appliedFindingIds: [],
+      summaryTable: markdownTable(candidates, new Set<string>()),
+      beforeArtifact,
+      afterArtifact
+    };
+  }
+
+  if (policyConfig.dryRun) {
+    await writeFile(afterArtifact, "Dry run mode enabled in policy config. No code changes were applied.", "utf8");
+    return {
+      skipped: "Dry-run mode enabled by policy",
       appliedFindingIds: [],
       summaryTable: markdownTable(candidates, new Set<string>()),
       beforeArtifact,
@@ -110,7 +135,7 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   const branch = await createDeterministicBranch(input.repoPath, input.runId, "safe");
   const appliedFindingIds = new Set<string>();
 
-  for (const candidate of safeCandidates) {
+  for (const candidate of policySelection.allowedCandidates) {
     const changed = await candidate.apply(input.repoPath);
     if (changed) {
       appliedFindingIds.add(candidate.findingId);
@@ -124,6 +149,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       branch,
       baseBranch,
       appliedFindingIds: [],
+      summaryTable: markdownTable(candidates, appliedFindingIds),
+      beforeArtifact,
+      afterArtifact
+    };
+  }
+
+  const gateResult = await evaluateChangePolicyGates(input.repoPath, policyConfig);
+  if (!gateResult.allowed) {
+    await writeFile(afterArtifact, gateResult.reason ?? "Change gates blocked update", "utf8");
+    return {
+      skipped: gateResult.reason ?? "Policy gate blocked changes",
+      branch,
+      baseBranch,
+      appliedFindingIds: [...appliedFindingIds],
       summaryTable: markdownTable(candidates, appliedFindingIds),
       beforeArtifact,
       afterArtifact
@@ -154,6 +193,8 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
 
   const repository = await getRepositorySlug(input.repoPath);
   const summaryTable = markdownTable(candidates, appliedFindingIds);
+  const checksPassed = process.env.AUDITBOT_CHECKS_PASSED === "true";
+  const draftPr = shouldCreateDraftPr(policyConfig);
   const prBody = buildReviewBody(summaryTable, beforeArtifact, afterArtifact);
   const provider = providerFromRemote(remote.url);
 
@@ -165,8 +206,13 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       head: branch,
       base: baseBranch,
       labels: ["risk:safe-autofix", "autofix"],
-      requireHumanReview: input.requireHumanReview ?? true
+      requireHumanReview: input.requireHumanReview ?? true,
+      draft: draftPr
     });
+
+    if (!pr.skipped && pr.number && shouldPromoteDraft(policyConfig, checksPassed)) {
+      await markGithubPullRequestReady(repository, pr.number);
+    }
 
     return {
       branch,
@@ -174,6 +220,7 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       commitSha,
       commitMessage,
       prUrl: pr.url,
+      draftPr,
       skipped: pr.skipped ? pr.reason : undefined,
       appliedFindingIds: [...appliedFindingIds],
       summaryTable,
@@ -190,7 +237,8 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       sourceBranch: branch,
       targetBranch: baseBranch,
       labels: ["risk:safe-autofix", "autofix"],
-      requireHumanReview: input.requireHumanReview ?? true
+      requireHumanReview: input.requireHumanReview ?? true,
+      draft: draftPr
     });
 
     return {
@@ -199,6 +247,7 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       commitSha,
       commitMessage,
       mrUrl: mr.url,
+      draftPr,
       skipped: mr.skipped ? mr.reason : undefined,
       appliedFindingIds: [...appliedFindingIds],
       summaryTable,
