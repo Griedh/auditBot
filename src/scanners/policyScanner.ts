@@ -26,7 +26,7 @@ export class PolicyScanner implements Scanner {
         severity: "high",
         file: "package.json",
         confidence: 0.95,
-        autofixable: false,
+        autofix: "none",
         patchMetadata: { strategy: "manual" }
       });
     }
@@ -41,9 +41,9 @@ export class PolicyScanner implements Scanner {
         severity: "low",
         file: "package.json",
         confidence: 0.7,
-        autofixable: true,
+        autofix: "safe",
         patchMetadata: {
-          strategy: "manual",
+          strategy: "codemod",
           patchPreview: "diff --git a/package.json b/package.json\n+  \"private\": true"
         }
       });

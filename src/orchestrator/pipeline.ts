@@ -6,6 +6,7 @@ import { PolicyScanner } from "../scanners/policyScanner.js";
 import { StaticScanner } from "../scanners/staticScanner.js";
 import { persistArtifacts } from "../reporting/persistArtifacts.js";
 import { detectRepositoryLayout } from "./detection.js";
+import { runFixEngine } from "./fixEngine.js";
 import { prepareWorkspace } from "./repository.js";
 
 export async function runPipeline(repoInput: string, artifactsRoot: string): Promise<RunReport> {
@@ -34,6 +35,19 @@ export async function runPipeline(repoInput: string, artifactsRoot: string): Pro
   const runDir = `${artifactsRoot}/${runId}`;
   await ensureDir(runDir);
 
+  const fixEngine = await runFixEngine({
+    repoPath: workspace.workspacePath,
+    runId,
+    findings,
+    runDir,
+    requireHumanReview: true
+  });
+
+  logs.push(`fix-engine: applied ${fixEngine.appliedFindingIds.length} safe finding(s)`);
+  if (fixEngine.skipped) {
+    logs.push(`fix-engine: ${fixEngine.skipped}`);
+  }
+
   const artifacts = await persistArtifacts({
     runDir,
     findings,
@@ -43,7 +57,8 @@ export async function runPipeline(repoInput: string, artifactsRoot: string): Pro
     layout,
     startedAt,
     finishedAt,
-    runId
+    runId,
+    fixEngine
   });
 
   return {
@@ -56,6 +71,7 @@ export async function runPipeline(repoInput: string, artifactsRoot: string): Pro
     packageManager: layout.packageManager,
     monorepo: layout.monorepo,
     workspaces: layout.workspaces,
-    findings
+    findings,
+    fixEngine
   };
 }

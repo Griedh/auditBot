@@ -33,8 +33,8 @@ export class StaticScanner implements Scanner {
         description: summary.slice(0, 500),
         severity: "medium",
         confidence: 0.8,
-        autofixable: false,
-        patchMetadata: { strategy: "manual" },
+        autofix: "risky",
+        patchMetadata: { strategy: "eslint-fix" },
         raw: { code: result.code }
       }
     ];

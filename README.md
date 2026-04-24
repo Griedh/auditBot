@@ -6,12 +6,13 @@ CLI-first TypeScript service for deterministic repository audits.
 
 - Isolated workspace setup from a git URL or local path.
 - Package manager/workspace layout detection (`npm`, `yarn`, `pnpm`, monorepo signals).
-- Read-only scanners:
+- Read-only scanners (with guarded autofix metadata):
   - dependency vulnerabilities
   - lint/static check pass/fail signal
   - custom policy checks
 - Unified finding schema in `src/models/finding.ts`.
 - Artifact persistence per run (`run.log`, `report.json`, `report.md`, `diff-preview.patch`).
+- Guarded fix engine: applies only `autofix: safe` findings in deterministic temp branches (`auditbot/<run-id>/<category>`), commits with finding IDs, pushes, and opens PR/MR requiring human review.
 
 ## Structure
 
