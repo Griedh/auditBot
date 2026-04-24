@@ -9,6 +9,10 @@ export interface PatchMetadata {
 
 export interface Finding {
   id: string;
+  source: string;
+  message: string;
+  autofixable: boolean;
+  fixType: PatchMetadata["strategy"];
   scanner: string;
   title: string;
   description: string;
