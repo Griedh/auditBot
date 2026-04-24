@@ -4,31 +4,38 @@ CLI-first TypeScript service for deterministic repository audits.
 
 ## Features
 
+- Monorepo package layout with dedicated CLI, core orchestration, and provider integrations.
 - Isolated workspace setup from a git URL or local path.
 - Package manager/workspace layout detection (`npm`, `yarn`, `pnpm`, monorepo signals).
 - Read-only scanners (with guarded autofix metadata):
   - dependency vulnerabilities
   - lint/static check pass/fail signal
   - custom policy checks
-- Unified finding schema in `src/models/finding.ts`.
-- Artifact persistence per run (`run.log`, `report.json`, `report.md`, `diff-preview.patch`).
-- Guarded fix engine: applies only `autofix: safe` findings in deterministic temp branches (`auditbot/<run-id>/<category>`), commits with finding IDs, pushes, and opens PR/MR requiring human review.
+- Guarded fix engine: applies only `autofix: safe` findings in deterministic temp branches.
 
-## Structure
+## Packages
 
-- `src/orchestrator/` pipeline orchestration and repository lifecycle.
-- `src/scanners/` scanner providers.
-- `src/models/finding.ts` normalized findings model.
-- `src/reporting/` report rendering and artifact persistence.
+- `packages/cli` entrypoint command (`auditbot`).
+- `packages/core` orchestration phases and scan/fix pipeline.
+- `packages/integrations` GitHub/GitLab review-request adapters.
+
+## Core orchestration phases
+
+`@auditbot/core` now exposes and composes:
+
+- `prepareRepo()`
+- `scan()`
+- `planFixes()`
+- `applyFixes()`
+- `createBranchAndPR()`
+- `emitReport()`
 
 ## Usage
 
 ```bash
 npm install
 npm run build
-node dist/cli.js --repo https://github.com/org/repo.git
-# or local path
-node dist/cli.js --repo ../some-repo --out ./.auditbot-runs
+node packages/cli/dist/index.js run --repo <url|path> --provider github --dry-run
 ```
 
 The CLI prints final run metadata as JSON and writes traceable artifacts into `--out/<runId>/`.

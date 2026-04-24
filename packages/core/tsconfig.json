@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true,
+    "paths": {
+      "@auditbot/integrations": ["../integrations/src/index.ts"]
+    }
+  },
+  "references": [{ "path": "../integrations" }],
+  "include": ["src/**/*.ts"]
+}

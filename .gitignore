@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .auditbot-runs/
+
+packages/**/dist/
+packages/**/*.tsbuildinfo

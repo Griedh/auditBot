@@ -3,18 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "auditbot": "dist/cli.js"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/cli.js",
-    "dev": "tsx src/cli.ts"
+    "build": "tsc -b",
+    "dev": "npm --workspace @auditbot/cli run dev",
+    "start": "npm --workspace @auditbot/cli run start"
   },
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.15.17",
     "tsx": "^4.19.3",
