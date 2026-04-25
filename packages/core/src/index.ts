@@ -151,12 +151,15 @@ export async function createBranchAndPR(input: {
   }
 
   const repository = input.repo.replace(/^https?:\/\/github.com\//, "").replace(/\.git$/, "");
+  const branchDate = new Date().toISOString().slice(0, 10);
+  const shortRunId = input.runId.slice(0, 8);
+  const headBranch = `auditbot/${branchDate}/${shortRunId}`;
   const response = await createReviewRequest({
     provider: input.provider,
     repository,
-    title: `auditBot run ${input.runId}`,
+    title: "fix(auditbot): apply safe lint/dependency remediations",
     body: "Automated auditBot follow-up review request.",
-    head: `auditbot/${input.runId}`,
+    head: headBranch,
     base: "main",
     labels: ["auditbot"]
   });

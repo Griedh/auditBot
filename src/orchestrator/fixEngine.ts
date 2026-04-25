@@ -158,15 +158,62 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   const baseBranch = await getCurrentBranch(input.repoPath);
   const branch = await createDeterministicBranch(input.repoPath, input.runId, "safe");
   const appliedFindingIds = new Set<string>();
-
+  const commitsByCategory: Array<{ category: string; commitSha: string; findingIds: string[]; commitMessage: string }> = [];
+  const candidatesByCategory = new Map<string, FixCandidate[]>();
   for (const candidate of policySelection.allowedCandidates) {
-    const changed = await candidate.apply(input.repoPath);
-    if (changed) {
-      appliedFindingIds.add(candidate.findingId);
-    }
+    const grouped = candidatesByCategory.get(candidate.category) ?? [];
+    grouped.push(candidate);
+    candidatesByCategory.set(candidate.category, grouped);
   }
 
-  if (!(await hasWorkingTreeChanges(input.repoPath))) {
+  for (const [category, categoryCandidates] of candidatesByCategory.entries()) {
+    const categoryAppliedIds: string[] = [];
+    for (const candidate of categoryCandidates) {
+      const changed = await candidate.apply(input.repoPath);
+      if (changed) {
+        appliedFindingIds.add(candidate.findingId);
+        categoryAppliedIds.push(candidate.findingId);
+      }
+    }
+
+    if (!(await hasWorkingTreeChanges(input.repoPath))) {
+      continue;
+    }
+
+    const gateResult = await evaluateChangePolicyGates(input.repoPath, policyConfig);
+    if (!gateResult.allowed) {
+      await writeFile(afterArtifact, gateResult.reason ?? "Change gates blocked update", "utf8");
+      return {
+        skipped: gateResult.reason ?? "Policy gate blocked changes",
+        branch,
+        baseBranch,
+        appliedFindingIds: [...appliedFindingIds],
+        summaryTable: markdownTable(candidates, appliedFindingIds),
+        beforeArtifact,
+        afterArtifact
+      };
+    }
+
+    const testGateResult = await testsPassIfConfigured(input.repoPath);
+    if (!testGateResult.allowed) {
+      await writeFile(afterArtifact, testGateResult.reason ?? "Test gate failed", "utf8");
+      return {
+        skipped: testGateResult.reason ?? "Test gate failed",
+        branch,
+        baseBranch,
+        appliedFindingIds: [...appliedFindingIds],
+        summaryTable: markdownTable(candidates, appliedFindingIds),
+        beforeArtifact,
+        afterArtifact
+      };
+    }
+
+    const commitMessage = buildCommitMessage(categoryAppliedIds);
+    const commitSha = await commitAll(input.repoPath, commitMessage);
+    commitsByCategory.push({ category, commitSha, findingIds: categoryAppliedIds, commitMessage });
+  }
+
+  if (commitsByCategory.length === 0) {
     await writeFile(afterArtifact, "Safe fixes produced no repository changes.", "utf8");
     return {
       skipped: "Safe fixes produced no repository changes",
@@ -179,36 +226,8 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
     };
   }
 
-  const gateResult = await evaluateChangePolicyGates(input.repoPath, policyConfig);
-  if (!gateResult.allowed) {
-    await writeFile(afterArtifact, gateResult.reason ?? "Change gates blocked update", "utf8");
-    return {
-      skipped: gateResult.reason ?? "Policy gate blocked changes",
-      branch,
-      baseBranch,
-      appliedFindingIds: [...appliedFindingIds],
-      summaryTable: markdownTable(candidates, appliedFindingIds),
-      beforeArtifact,
-      afterArtifact
-    };
-  }
-
-  const testGateResult = await testsPassIfConfigured(input.repoPath);
-  if (!testGateResult.allowed) {
-    await writeFile(afterArtifact, testGateResult.reason ?? "Test gate failed", "utf8");
-    return {
-      skipped: testGateResult.reason ?? "Test gate failed",
-      branch,
-      baseBranch,
-      appliedFindingIds: [...appliedFindingIds],
-      summaryTable: markdownTable(candidates, appliedFindingIds),
-      beforeArtifact,
-      afterArtifact
-    };
-  }
-
-  const commitMessage = buildCommitMessage([...appliedFindingIds]);
-  const commitSha = await commitAll(input.repoPath, commitMessage);
+  const commitSha = commitsByCategory[commitsByCategory.length - 1]?.commitSha;
+  const commitMessage = commitsByCategory.map((entry) => `${entry.category}: ${entry.commitMessage}`).join("\n\n");
   const diffSummary = await diffStat(input.repoPath);
   await writeFile(afterArtifact, diffSummary, "utf8");
 
