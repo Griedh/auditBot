@@ -1,4 +1,5 @@
 import { execCommand } from "../utils/exec.js";
+import process from "node:process";
 import type { GitRemoteInfo } from "./types.js";
 
 async function runGit(repoPath: string, args: string[]): Promise<string> {
@@ -21,7 +22,9 @@ export async function getDefaultRemote(repoPath: string): Promise<GitRemoteInfo 
 }
 
 export async function createDeterministicBranch(repoPath: string, runId: string, category: string): Promise<string> {
-  const branch = `auditbot/${runId}/${category}`;
+  const shortRunId = runId.slice(0, 8);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const branch = `auditbot/${dateStamp}/${shortRunId}-${category}`;
   await runGit(repoPath, ["checkout", "-B", branch]);
   return branch;
 }
@@ -38,13 +41,23 @@ export async function commitAll(repoPath: string, message: string): Promise<stri
 }
 
 export async function pushBranch(repoPath: string, branch: string, remoteName: string): Promise<void> {
+  const repoToken = process.env.AUDITBOT_REPO_TOKEN;
+  if (repoToken) {
+    const remoteUrl = await runGit(repoPath, ["remote", "get-url", remoteName]);
+    if (remoteUrl.startsWith("https://")) {
+      const tokenUrl = remoteUrl.replace("https://", `https://x-access-token:${repoToken}@`);
+      await runGit(repoPath, ["push", "-u", tokenUrl, branch]);
+      return;
+    }
+  }
+
   await runGit(repoPath, ["push", "-u", remoteName, branch]);
 }
 
 export function buildCommitMessage(findingIds: string[]): string {
   const uniqueIds = [...new Set(findingIds)].sort();
   return [
-    "fix(auditbot): apply safe autofixes",
+    "fix(auditbot): apply safe lint/dependency remediations",
     "",
     `finding-ids: ${uniqueIds.join(",")}`,
     "guardrails: autofix=safe only"
