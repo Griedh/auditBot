@@ -80,22 +80,53 @@ function providerFromRemote(url: string): "github" | "gitlab" | "unknown" {
   return "unknown";
 }
 
-function buildReviewBody(summaryTable: string, beforeArtifact: string, afterArtifact: string): string {
+interface ReviewBodyInput {
+  detectedCount: number;
+  safeCandidateCount: number;
+  appliedFindingIds: string[];
+  summaryTable: string;
+  lintResult: string;
+  testResult: string;
+  auditDelta: string;
+  riskLevel: string;
+  beforeArtifact: string;
+  afterArtifact: string;
+  changesSummaryArtifact: string;
+}
+
+function buildReviewBody(input: ReviewBodyInput): string {
+  const autoFixLines =
+    input.appliedFindingIds.length > 0
+      ? input.appliedFindingIds.map((id) => `- ${id}`)
+      : ["- No findings were auto-fixed."];
+
   return [
-    "## Auto-fix summary",
+    "## What was detected",
+    `- Total findings detected: ${input.detectedCount}`,
+    `- Safe auto-fix candidates: ${input.safeCandidateCount}`,
     "",
-    summaryTable,
+    "## What was auto-fixed",
+    ...autoFixLines,
     "",
-    "## Risk label",
-    "`risk:safe-autofix`",
+    "### Auto-fix matrix",
+    input.summaryTable,
     "",
-    "## Rollback guidance",
+    "## Risk level",
+    `- ${input.riskLevel}`,
+    "",
+    "## Validation results (lint/test/audit delta)",
+    `- Lint: ${input.lintResult}`,
+    `- Test: ${input.testResult}`,
+    `- Audit delta: ${input.auditDelta}`,
+    "",
+    "## Rollback instructions",
     "- Revert commit in this branch: `git revert <commit-sha>`.",
     "- Or close this PR/MR and delete the branch if fix scope is not acceptable.",
     "",
-    "## Artifacts",
-    `- Before: ${beforeArtifact}`,
-    `- After: ${afterArtifact}`,
+    "## Attached artifacts",
+    `- audit-before.json: ${input.beforeArtifact}`,
+    `- audit-after.json: ${input.afterArtifact}`,
+    `- changes-summary.md: ${input.changesSummaryArtifact}`,
     "",
     "## Merge guardrail",
     "- Auto-merge is disabled. Human review is required unless explicitly configured."
@@ -122,16 +153,45 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   const safeCandidates = candidates.filter((candidate) => candidate.risk === "safe");
   const findingsById = new Map<string, Finding>(input.findings.map((finding) => [finding.id, finding]));
   const policySelection = selectCandidatesByPolicy(safeCandidates, findingsById, policyConfig);
-  const beforeArtifact = path.join(input.runDir, "fixes-before.txt");
-  const afterArtifact = path.join(input.runDir, "fixes-after.txt");
+  const beforeArtifact = path.join(input.runDir, "audit-before.json");
+  const afterArtifact = path.join(input.runDir, "audit-after.json");
+  const changesSummaryArtifact = path.join(input.runDir, "changes-summary.md");
   await writeFile(
     beforeArtifact,
-    policySelection.allowedCandidates.map((candidate) => `${candidate.findingId}: ${candidate.summary}`).join("\n"),
+    JSON.stringify(
+      {
+        runId: input.runId,
+        detectedCount: input.findings.length,
+        safeCandidateCount: safeCandidates.length,
+        allowedCandidates: policySelection.allowedCandidates.map((candidate) => ({
+          findingId: candidate.findingId,
+          summary: candidate.summary,
+          risk: candidate.risk
+        })),
+        blockedCandidates: policySelection.skipped
+      },
+      null,
+      2
+    ),
     "utf8"
   );
+  await writeFile(changesSummaryArtifact, "No fix changes were produced.", "utf8");
 
   if (policySelection.allowedCandidates.length === 0) {
-    await writeFile(afterArtifact, "No safe candidates generated.", "utf8");
+    await writeFile(
+      afterArtifact,
+      JSON.stringify(
+        {
+          runId: input.runId,
+          appliedFindingIds: [],
+          status: "skipped",
+          reason: "No safe candidates generated."
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
     return {
       skipped:
         policySelection.skipped.length > 0
@@ -145,7 +205,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   }
 
   if (policyConfig.dryRun) {
-    await writeFile(afterArtifact, "Dry run mode enabled in policy config. No code changes were applied.", "utf8");
+    await writeFile(
+      afterArtifact,
+      JSON.stringify(
+        {
+          runId: input.runId,
+          appliedFindingIds: [],
+          status: "skipped",
+          reason: "Dry run mode enabled in policy config. No code changes were applied."
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
     return {
       skipped: "Dry-run mode enabled by policy",
       appliedFindingIds: [],
@@ -182,7 +255,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
 
     const gateResult = await evaluateChangePolicyGates(input.repoPath, policyConfig);
     if (!gateResult.allowed) {
-      await writeFile(afterArtifact, gateResult.reason ?? "Change gates blocked update", "utf8");
+      await writeFile(
+        afterArtifact,
+        JSON.stringify(
+          {
+            runId: input.runId,
+            appliedFindingIds: [...appliedFindingIds],
+            status: "blocked",
+            reason: gateResult.reason ?? "Change gates blocked update"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       return {
         skipped: gateResult.reason ?? "Policy gate blocked changes",
         branch,
@@ -196,7 +282,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
 
     const testGateResult = await testsPassIfConfigured(input.repoPath);
     if (!testGateResult.allowed) {
-      await writeFile(afterArtifact, testGateResult.reason ?? "Test gate failed", "utf8");
+      await writeFile(
+        afterArtifact,
+        JSON.stringify(
+          {
+            runId: input.runId,
+            appliedFindingIds: [...appliedFindingIds],
+            status: "blocked",
+            reason: testGateResult.reason ?? "Test gate failed"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       return {
         skipped: testGateResult.reason ?? "Test gate failed",
         branch,
@@ -214,7 +313,20 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   }
 
   if (commitsByCategory.length === 0) {
-    await writeFile(afterArtifact, "Safe fixes produced no repository changes.", "utf8");
+    await writeFile(
+      afterArtifact,
+      JSON.stringify(
+        {
+          runId: input.runId,
+          appliedFindingIds: [],
+          status: "skipped",
+          reason: "Safe fixes produced no repository changes."
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
     return {
       skipped: "Safe fixes produced no repository changes",
       branch,
@@ -229,7 +341,26 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   const commitSha = commitsByCategory[commitsByCategory.length - 1]?.commitSha;
   const commitMessage = commitsByCategory.map((entry) => `${entry.category}: ${entry.commitMessage}`).join("\n\n");
   const diffSummary = await diffStat(input.repoPath);
-  await writeFile(afterArtifact, diffSummary, "utf8");
+  await writeFile(
+    afterArtifact,
+    JSON.stringify(
+      {
+        runId: input.runId,
+        appliedFindingIds: [...appliedFindingIds],
+        commitSha,
+        commits: commitsByCategory,
+        diffSummary
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  await writeFile(
+    changesSummaryArtifact,
+    ["# Auto-fix Changes Summary", "", markdownTable(candidates, appliedFindingIds), "", "## Diff stat", diffSummary].join("\n"),
+    "utf8"
+  );
 
   const remote = await getDefaultRemote(input.repoPath);
   if (!remote) {
@@ -252,7 +383,19 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
   const summaryTable = markdownTable(candidates, appliedFindingIds);
   const checksPassed = process.env.AUDITBOT_CHECKS_PASSED === "true";
   const draftPr = shouldCreateDraftPr(policyConfig);
-  const prBody = buildReviewBody(summaryTable, beforeArtifact, afterArtifact);
+  const prBody = buildReviewBody({
+    detectedCount: input.findings.length,
+    safeCandidateCount: safeCandidates.length,
+    appliedFindingIds: [...appliedFindingIds],
+    summaryTable,
+    lintResult: "not configured",
+    testResult: "pass (if configured)",
+    auditDelta: `${input.findings.length} findings detected, ${appliedFindingIds.size} auto-fixed`,
+    riskLevel: "risk:safe-autofix",
+    beforeArtifact,
+    afterArtifact,
+    changesSummaryArtifact
+  });
   const provider = providerFromRemote(remote.url);
 
   if (provider === "github" && repository) {
