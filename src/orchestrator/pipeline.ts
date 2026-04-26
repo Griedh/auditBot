@@ -40,6 +40,7 @@ export async function runPipeline(repoInput: string, artifactsRoot: string): Pro
     runId,
     findings,
     runDir,
+    packageManager: layout.packageManager,
     requireHumanReview: true
   });
 
