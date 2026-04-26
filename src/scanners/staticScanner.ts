@@ -4,6 +4,7 @@ import { execCommand } from "../utils/exec.js";
 import { stableId } from "../utils/hash.js";
 import type { Finding } from "../models/finding.js";
 import type { Scanner, ScanContext } from "./types.js";
+import { ESLINT_SAFE_RULES } from "../eslintSafeRules.js";
 
 interface EslintResultEntry {
   filePath: string;
@@ -28,21 +29,6 @@ const ESLINT_CONFIG_FILES = [
   "eslint.config.mjs",
   "eslint.config.ts"
 ];
-
-const SAFE_AUTOFIX_RULES = new Set<string>([
-  "array-bracket-spacing",
-  "arrow-spacing",
-  "comma-dangle",
-  "eol-last",
-  "keyword-spacing",
-  "no-multiple-empty-lines",
-  "no-trailing-spaces",
-  "object-curly-spacing",
-  "quotes",
-  "semi",
-  "space-before-blocks",
-  "space-in-parens"
-]);
 
 const RAW_LOG_LIMIT = 1000;
 
@@ -127,7 +113,7 @@ export class StaticScanner implements Scanner {
           severity: severityFromEslint(item.severity),
           file: entry.filePath,
           confidence: 0.9,
-          autofix: item.fix && SAFE_AUTOFIX_RULES.has(ruleId) ? "safe" : item.fix ? "risky" : "none",
+          autofix: item.fix && ESLINT_SAFE_RULES.has(ruleId) ? "safe" : item.fix ? "risky" : "none",
           patchMetadata: { strategy: item.fix ? "eslint-fix" : "manual" },
           raw: item
         });

@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Finding } from "../models/finding.js";
 import type { FixCandidate, RuleFixer } from "./types.js";
+import { ESLINT_SAFE_RULES } from "../eslintSafeRules.js";
 
 interface EslintFixData {
   range?: [number, number];
@@ -12,21 +13,6 @@ interface EslintFindingRaw {
   ruleId?: string | null;
   fix?: EslintFixData;
 }
-
-const SAFE_AUTOFIX_RULES = new Set<string>([
-  "array-bracket-spacing",
-  "arrow-spacing",
-  "comma-dangle",
-  "eol-last",
-  "keyword-spacing",
-  "no-multiple-empty-lines",
-  "no-trailing-spaces",
-  "object-curly-spacing",
-  "quotes",
-  "semi",
-  "space-before-blocks",
-  "space-in-parens"
-]);
 
 function parseFix(raw: unknown): EslintFixData | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -55,7 +41,7 @@ export class EslintFixer implements RuleFixer {
     const fix = parseFix(finding.raw);
     const ruleId = parseRuleId(finding.raw);
 
-    if (!file || !fix?.range || !SAFE_AUTOFIX_RULES.has(ruleId ?? "")) {
+    if (!file || !fix?.range || !ESLINT_SAFE_RULES.has(ruleId ?? "")) {
       return undefined;
     }
 
