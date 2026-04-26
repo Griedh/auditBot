@@ -4,11 +4,18 @@ import process from "node:process";
 import { runAudit, type RunOptions } from "@auditbot/core";
 type Provider = "github" | "gitlab";
 
+const EXIT_CODE_USAGE = 2;
+const EXIT_CODE_RUNTIME = 1;
+
+class CliUsageError extends Error {}
+
 function parseArgs(argv: string[]): RunOptions {
   const [command, ...rest] = argv;
 
   if (command !== "run") {
-    throw new Error("Usage: auditbot run --repo <url|path> --provider <github|gitlab> [--dry-run] [--out <dir>]");
+    throw new CliUsageError(
+      "Usage: auditbot run --repo <url|path> [--provider <github|gitlab>] [--dry-run] [--out <dir>]"
+    );
   }
 
   const options = new Map<string, string>();
@@ -22,16 +29,17 @@ function parseArgs(argv: string[]): RunOptions {
   }
 
   const repo = options.get("--repo");
-  const provider = (options.get("--provider") ?? "github") as Provider;
+  const providerFlag = options.get("--provider");
+  const provider = providerFlag ? (providerFlag as Provider) : undefined;
   const outDir = options.get("--out") ?? path.resolve(process.cwd(), ".auditbot-runs");
-  const dryRun = rest.includes("--dry-run");
+  const dryRun = rest.includes("--dry-run") ? true : undefined;
 
   if (!repo) {
-    throw new Error("Missing required flag: --repo");
+    throw new CliUsageError("Missing required flag: --repo");
   }
 
-  if (provider !== "github" && provider !== "gitlab") {
-    throw new Error("Invalid --provider value. Expected github or gitlab.");
+  if (provider !== undefined && provider !== "github" && provider !== "gitlab") {
+    throw new CliUsageError("Invalid --provider value. Expected github or gitlab.");
   }
 
   return { repo, provider, outDir, dryRun };
@@ -45,5 +53,5 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
+  process.exitCode = error instanceof CliUsageError ? EXIT_CODE_USAGE : EXIT_CODE_RUNTIME;
 });

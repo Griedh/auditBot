@@ -40,9 +40,16 @@ export interface RunReport {
 
 export interface RunOptions {
   repo: string;
-  provider: Provider;
-  dryRun: boolean;
+  provider?: Provider;
+  dryRun?: boolean;
   outDir: string;
+}
+
+interface AuditBotConfig {
+  provider?: Provider;
+  dryRun?: boolean;
+  baseBranch?: string;
+  outDir?: string;
 }
 
 interface PreparedRepo {
@@ -132,7 +139,7 @@ export async function applyFixes(input: { runDir: string; dryRun: boolean }): Pr
   await writeFile(afterArtifact, input.dryRun ? "Dry-run mode: no fixes applied.\n" : "No-op fix phase.\n", "utf8");
 
   return {
-    skipped: input.dryRun ? "CLI dry-run enabled" : "No-op fixer",
+    skipped: input.dryRun ? "Dry-run enabled" : "No-op fixer",
     appliedFindingIds: [],
     summaryTable: "| Finding ID | Summary | Risk | Applied |\n|---|---|---|---|",
     beforeArtifact,
@@ -140,11 +147,28 @@ export async function applyFixes(input: { runDir: string; dryRun: boolean }): Pr
   };
 }
 
+async function loadAuditBotConfig(repoPath: string): Promise<AuditBotConfig> {
+  const configPath = path.join(repoPath, "auditbot.config.json");
+  if (!existsSync(configPath)) {
+    return {};
+  }
+
+  const parsed = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+  const provider =
+    parsed.provider === "github" || parsed.provider === "gitlab" ? (parsed.provider as Provider) : undefined;
+  const dryRun = typeof parsed.dryRun === "boolean" ? parsed.dryRun : undefined;
+  const baseBranch = typeof parsed.baseBranch === "string" && parsed.baseBranch.trim() ? parsed.baseBranch.trim() : undefined;
+  const outDir = typeof parsed.outDir === "string" && parsed.outDir.trim() ? parsed.outDir.trim() : undefined;
+
+  return { provider, dryRun, baseBranch, outDir };
+}
+
 export async function createBranchAndPR(input: {
   provider: Provider;
   repo: string;
   runId: string;
   dryRun: boolean;
+  baseBranch: string;
 }): Promise<{ prUrl?: string; mrUrl?: string }> {
   if (input.dryRun || isGitUrl(input.repo) === false) {
     return {};
@@ -160,7 +184,7 @@ export async function createBranchAndPR(input: {
     title: "fix(auditbot): apply safe lint/dependency remediations",
     body: "Automated auditBot follow-up review request.",
     head: headBranch,
-    base: "main",
+    base: input.baseBranch,
     labels: ["auditbot"]
   });
 
@@ -187,21 +211,27 @@ export async function emitReport(input: {
 export async function runAudit(options: RunOptions): Promise<RunReport> {
   const startedAt = new Date().toISOString();
   const prepared = await prepareRepo(options.repo);
+  const config = await loadAuditBotConfig(prepared.workspacePath);
+  const provider = options.provider ?? config.provider ?? "github";
+  const dryRun = options.dryRun ?? config.dryRun ?? false;
+  const outDir = config.outDir ? path.resolve(config.outDir) : options.outDir;
+  const baseBranch = config.baseBranch ?? "main";
   const findings = await scan(prepared.workspacePath);
   const plan = planFixes(findings);
 
   const runId = stableId(`${prepared.source}:${startedAt}`);
-  const runDir = path.join(options.outDir, runId);
+  const runDir = path.join(outDir, runId);
   await mkdir(runDir, { recursive: true });
 
-  const fixEngine = await applyFixes({ runDir, dryRun: options.dryRun });
-  const review = await createBranchAndPR({ provider: options.provider, repo: options.repo, runId, dryRun: options.dryRun });
+  const fixEngine = await applyFixes({ runDir, dryRun });
+  const review = await createBranchAndPR({ provider, repo: options.repo, runId, dryRun, baseBranch });
 
   const finishedAt = new Date().toISOString();
   return emitReport({
     runDir,
     logs: [
       `prepareRepo: ${prepared.workspacePath}`,
+      `config: ${existsSync(path.join(prepared.workspacePath, "auditbot.config.json")) ? "loaded" : "default"}`,
       `scan: ${findings.length} finding(s)`,
       `planFixes: safe=${plan.safeFindingIds.length} risky=${plan.riskyFindingIds.length}`,
       `applyFixes: ${fixEngine.skipped ?? "done"}`,
