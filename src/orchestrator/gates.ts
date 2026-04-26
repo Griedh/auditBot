@@ -46,11 +46,14 @@ function normalizePathPrefix(pathPrefix: string): string {
   return pathPrefix.replace(/^\.\//, "").replace(/^\/+/, "").replace(/\\/g, "/");
 }
 
-function inForbiddenPath(filePath: string, forbiddenPaths: string[]): boolean {
+export function inForbiddenPath(filePath: string, forbiddenPaths: string[]): boolean {
   const normalizedFilePath = normalizePathPrefix(filePath);
   return forbiddenPaths.some((forbiddenPath) => {
     const normalizedForbiddenPath = normalizePathPrefix(forbiddenPath);
-    return normalizedForbiddenPath.length > 0 && normalizedFilePath.startsWith(normalizedForbiddenPath);
+    return normalizedForbiddenPath.length > 0 && (
+      normalizedFilePath === normalizedForbiddenPath
+      || normalizedFilePath.startsWith(`${normalizedForbiddenPath}/`)
+    );
   });
 }
 
