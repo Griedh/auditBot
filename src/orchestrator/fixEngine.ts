@@ -33,6 +33,7 @@ interface FixEngineInput {
   runId: string;
   findings: Finding[];
   runDir: string;
+  packageManager: "npm" | "yarn" | "pnpm" | "unknown";
   requireHumanReview?: boolean;
 }
 
@@ -44,19 +45,38 @@ interface PackageJson {
   scripts?: Record<string, string>;
 }
 
-async function testsPassIfConfigured(repoPath: string): Promise<GateResult> {
+interface TestCommand {
+  command: string;
+  args: string[];
+  display: string;
+}
+
+function testCommandForPackageManager(packageManager: FixEngineInput["packageManager"]): TestCommand {
+  if (packageManager === "pnpm") {
+    return { command: "pnpm", args: ["test"], display: "pnpm test" };
+  }
+
+  if (packageManager === "yarn") {
+    return { command: "yarn", args: ["test"], display: "yarn test" };
+  }
+
+  return { command: "npm", args: ["run", "test"], display: "npm run test" };
+}
+
+async function testsPassIfConfigured(repoPath: string, packageManager: FixEngineInput["packageManager"]): Promise<GateResult> {
   const pkg = await readJson<PackageJson>(path.join(repoPath, "package.json"));
   const testScript = pkg?.scripts?.test;
   if (!testScript) {
     return { allowed: true };
   }
 
-  const result = await execCommand("npm", ["run", "test"], repoPath);
+  const testCommand = testCommandForPackageManager(packageManager);
+  const result = await execCommand(testCommand.command, testCommand.args, repoPath);
   if (result.code !== 0) {
-    return { allowed: false, reason: "Test command failed after applying fixes" };
+    return { allowed: false, reason: `Test gate failed after applying fixes: ${testCommand.display}` };
   }
 
-  return { allowed: true };
+  return { allowed: true, reason: `Test gate passed: ${testCommand.display}` };
 }
 
 interface GateResult {
@@ -280,7 +300,7 @@ export async function runFixEngine(input: FixEngineInput): Promise<FixEngineResu
       };
     }
 
-    const testGateResult = await testsPassIfConfigured(input.repoPath);
+    const testGateResult = await testsPassIfConfigured(input.repoPath, input.packageManager);
     if (!testGateResult.allowed) {
       await writeFile(
         afterArtifact,
